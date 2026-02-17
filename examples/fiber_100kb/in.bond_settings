@@ -1,0 +1,31 @@
+bond_coeff 1 harmonic ${kbond} 35.000
+bond_coeff 2 harmonic ${kbond} 32.396
+bond_coeff 3 morse ${kmorse} ${alphamorse} 32.750 # eq: 33.419
+bond_coeff 4 morse ${kmorse} ${alphamorse} 34.100 # eq: 34.796
+bond_coeff 5 morse ${kmorse} ${alphamorse} 29.012 # eq: 29.604
+bond_coeff 6 morse ${kmorse2} ${alphamorse} 32.750 # eq: 33.419
+bond_coeff 7 morse ${kmorse2} ${alphamorse} 34.100 # eq: 34.796
+bond_coeff 8 morse ${kmorse2} ${alphamorse} 29.012 # eq: 29.604
+bond_coeff 9 morse ${kmorse2} ${alphamorse} 32.750 # eq: 33.419
+bond_coeff 10 morse ${kmorse2} ${alphamorse} 34.100 # eq: 34.796
+bond_coeff 11 morse ${kmorse2} ${alphamorse} 29.012 # eq: 29.604
+bond_coeff 12 harmonic ${kbond} 20.577
+bond_coeff 13 harmonic ${kbond} 33.835
+bond_coeff 14 harmonic ${kbond} 35.603
+bond_coeff 15 harmonic ${kbond} 27.801
+bond_coeff 16 harmonic ${kbond} 23.352
+bond_coeff 17 harmonic ${kbond} 34.117
+bond_coeff 18 harmonic ${kbond} 23.421
+bond_coeff 19 harmonic ${kbond} 27.965
+bond_coeff 20 harmonic ${kbond} 35.670
+bond_coeff 21 harmonic ${kbond} 33.881
+bond_coeff 22 harmonic ${kbond} 27.960
+bond_coeff 23 harmonic ${kbond} 23.419
+bond_coeff 24 harmonic ${kbond} 34.776
+bond_coeff 25 harmonic ${kbond} 33.084
+bond_coeff 26 harmonic ${kbond} 37.901
+bond_coeff 27 harmonic ${kbond} 34.783
+bond_coeff 28 harmonic ${kbond} 34.777
+bond_coeff 29 harmonic ${kbond} 29.282
+bond_coeff 30 harmonic ${kbond} 29.926
+bond_coeff 31 harmonic ${kbond} 37.205

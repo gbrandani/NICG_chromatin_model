@@ -1,5 +1,5 @@
 # set logfile
-log		./log.run
+log		./log.relax
 variable seed equal 1
 # Box and units  (use LJ units and periodic boundaries)
 units		real
@@ -26,8 +26,8 @@ neigh_modify	every 1 delay 10 check yes # default options
 #neigh_modify one 500
 
 # READ "start" data file
-#read_data       data.relax
-read_restart    restart.relax.10000
+read_data       data.chromatin
+#read_restart    restart.run.1
 
 # calculate Debye length, used to set cutoffs
 variable T      equal 300.0  
@@ -56,30 +56,38 @@ variable kmorse     equal 2.2 # k of morse potential controlling nucleosome unwr
 variable kmorse2    equal 1.8 # k of morse potential controlling acetylated nucleosome unwrapping
 variable alphamorse equal 0.3 # alpha of morse potential controlling nucleosome unwrapping, 0.2 value gives shape similar to LJ
 
+# soft core variables
+variable n_soft      equal 1.0
+variable alpha_lj    equal 0.5
+#variable alpha_coul  equal 10
+variable lamstart    equal 0.2
+variable lam equal ramp(${lamstart},1.0)
+
 # define interactions
 # kBT = 1.38064852e-23x300 = 4.1419456e-24 kJ = 0.989949e-24 kCal (1 kCal = 4.184 kJ) = 0.596161 kCal/mol (Navogadro=6.022e23)
 # using kBT ~ 0.6 kCal mol (can also be obtained using 1 kBT ~ 2.5 kJ/mol)
-#pair_style      lj/cut/soft ${n_soft} ${alpha_lj} ${lj_cut}
-pair_style      lj/cut/coul/debye  ${ldebye_inv} ${lj_cut} ${ldebye_cut} # kappa cutoff_lj (cutoff_debye)
+pair_style      lj/cut/soft ${n_soft} ${alpha_lj} ${lj_cut}
+#pair_style      lj/cut/coul/debye  ${ldebye_inv} ${lj_cut} ${ldebye_cut} # kappa cutoff_lj (cutoff_debye)
 bond_style	hybrid harmonic morse
 angle_style	cosine # E = K cos(theta) + const
 special_bonds	lj/coul 0.0 1.0 1.0 # scaling coefficients for 1-2, 1-3, and 1-4 neighbor interactions
 
 # force field parameters
 # pairs
-pair_coeff	* * ${kpair} ${sigma} # type1 type2 eps sigma (cutoff_lj cutoff_debye)
+pair_coeff	* * ${kpair} ${sigma} ${lamstart} # type1 type2 eps sigma lambda
 # turn off DNA-DNA lj interactions with cutoff at 2^1/6 sigma
-pair_coeff      1 1 ${kpair} ${sigma} ${lj_cut_min} ${ldebye_cut}
+#pair_coeff      1 1 ${kpair} ${sigma_min} ${lj_cut_min} ${ldebye_cut}
+pair_coeff      1 1 ${kpair} ${sigma} ${lamstart}
 # interactions between DNA and acetylated 
-pair_coeff	1 8*19 ${kpair2} ${sigma} 
+pair_coeff	1 8*19 ${kpair2} ${sigma} ${lamstart}
 # interactions between canonical and acetylated 
-pair_coeff	2*7 8*19 ${kpairh} ${sigma} 
+pair_coeff	2*7 8*19 ${kpairh} ${sigma} ${lamstart}
 # interactions between acetylated and acetylated 
-pair_coeff	8*13 8*13 ${kpair2} ${sigma} 
+pair_coeff	8*13 8*13 ${kpair2} ${sigma} ${lamstart}
 # interactions between acetylated and acetylated, mediated by BRD4
-pair_coeff	8*19 14*19  ${kpairb} ${sigma} 
+pair_coeff	8*19 14*19  ${kpairb} ${sigma} ${lamstart}
 # H1 interactions, note these interactions should be weakened with acetylated nucleosomes
-pair_coeff      1 20 ${kH1} ${sigma}
+pair_coeff      1 20 ${kH1} ${sigma} ${lamstart}
 
 # bonds and angles
 #bond_coeff	* 1.0 ${sigma} # type K r0 E=K(r-r0)^2 -> kBT/2=K<(r-r0)^2> -> K=kBT/2/<(r-r0)^2>=0.6/2/(47/228)^2
@@ -87,11 +95,18 @@ include         in.bond_settings
 angle_coeff	1 ${kangle} # cosine:         type, K;         -log(cos_theta) has a slope of     K ~2 kBT = 1.2 Kcal/mol
 
 # Sample thermodynamic info  (temperature, energy, pressure, etc.) #####
+thermo		10
+thermo_style	custom step pe epair ebond
+
+# short energy minimization
+minimize 0.0 1.0e-8 1000 10000
+
+# Sample thermodynamic info  (temperature, energy, pressure, etc.) #####
 thermo		1000
 thermo_style	custom step temp pe epair ebond
 
 # Dump configs - "simple dumpings"
-dump		1 all dcd 10000 run.dcd
+dump		1 all dcd 100000 relax.dcd
 
 # set timestep from (lJ steeper than bonds)
 # tau   = sqrt(mass/eps)sigma
@@ -106,11 +121,13 @@ dump		1 all dcd 10000 run.dcd
 fix		nve all nve   ###NVE ensemble
 #fix		com all recenter 0.0 0.0 0.0 units box
 fix		lan all langevin ${T} ${T} 1000.0 ${seed} # Langevin integrator Tstart Tstop damp rndseed
+#soft potential: increase from 0 to 1 changes every 200 steps
+fix             fep all adapt/fep 200 pair lj/cut/soft lambda * *  v_lam
 
-timestep        10.0
+timestep        1.0
 reset_timestep  0
 
 # run
-restart		10000 ./restart.run.1 ./restart.run.2 # create restart file every 100 frames in case job is killed
+restart		10000 restart.relax # create restart file every 100 frames in case job is killed
 
 run		10000

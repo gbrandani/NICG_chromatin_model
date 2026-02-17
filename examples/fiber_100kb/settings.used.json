@@ -1,0 +1,81 @@
+{
+  "settings": {
+    "total_kb": 100.0,
+    "chrom_name": "chrSim",
+    "nucleosomal_dna_bp": 147,
+    "bp_per_bead": 10.5,
+    "linker_bp_mean": 40.0,
+    "linker_bp_sd": 30.0,
+    "reject_negative_linkers": true,
+    "domain_mean_kb_A": 12.5,
+    "domain_mean_kb_B": 12.5,
+    "start_compartment": null,
+    "ac_prob_A": 0.4,
+    "ac_prob_B": 0.2,
+    "h1_prob_A": 0.3,
+    "h1_prob_B": 0.6,
+    "brd4_given_ac": 0.2,
+    "leading_overhang_bp": 0,
+    "chain_name": "input_chain1.txt",
+    "top_level_name": "chains.txt",
+    "used_settings_name": "settings.used.json",
+    "nucs_bed_name": "nucs.bed",
+    "cg_path": "reference.xyz",
+    "seed": 123
+  },
+  "derived": {
+    "total_bp": 100000,
+    "N_nucleosomes": 519,
+    "leading_overhang_bp": 0,
+    "trailing_overhang_bp": 9,
+    "domains": [
+      {
+        "type": "B",
+        "len_bp": 1462
+      },
+      {
+        "type": "A",
+        "len_bp": 3147
+      },
+      {
+        "type": "B",
+        "len_bp": 3849
+      },
+      {
+        "type": "A",
+        "len_bp": 1147
+      },
+      {
+        "type": "B",
+        "len_bp": 29395
+      },
+      {
+        "type": "A",
+        "len_bp": 53605
+      },
+      {
+        "type": "B",
+        "len_bp": 1932
+      },
+      {
+        "type": "A",
+        "len_bp": 5463
+      }
+    ],
+    "fraction_A_by_bp": 0.63362,
+    "fraction_A_by_nucleosomes": 0.6358381502890174,
+    "ac_frac_overall": 0.3371868978805395,
+    "ac_frac_in_A": 0.41515151515151516,
+    "ac_frac_in_B": 0.20105820105820105,
+    "h1_frac_overall": 0.43352601156069365,
+    "h1_frac_in_A": 0.31212121212121213,
+    "h1_frac_in_B": 0.6455026455026455,
+    "brd4_given_ac_empirical": 0.24,
+    "linker_bp_mean_empirical": 45.74903474903475,
+    "linker_bp_sd_empirical": 24.896518438175686,
+    "ll_beads_minmax": [
+      0,
+      11
+    ]
+  }
+}

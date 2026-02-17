@@ -1,0 +1,8 @@
+# Ignore LAMMPS output
+log.*
+restart.*
+*.dcd
+*.xtc
+
+# Ignore OS-specific files
+.DS_Store
