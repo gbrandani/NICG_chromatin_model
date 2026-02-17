@@ -1,0 +1,118 @@
+# set logfile
+log		./log.run
+variable seed equal 1
+# Box and units  (use LJ units and periodic boundaries)
+units		real
+# so:
+#    mass = grams/mole		# same in gromacs
+#    distance = Angstroms	# nm in gromacs
+#    time = femtoseconds	# ps in gromacs
+#    energy = Kcal/mole		# Kcal/mol in gromacs
+#    velocity = Angstroms/femtosecond	# ...
+#    force = Kcal/mole-Angstrom	# ...
+#    temperature = Kelvin	# same in gromacs
+#    pressure = atmospheres	# same in gromacs
+#    dynamic viscosity = Poise	#
+dimension	3
+atom_style	full
+boundary	p p p
+
+# Pair interactions require lists of neighbours to be calculated
+#neighbor	60.0 nsq # may be faster for unsolvated small molecules in a non-periodic box, scales as N^2
+#package gpu 4 neigh no #binsize 35.0   #use GPU to calculate neighbor list or not
+
+neighbor        35.0 bin # scales as N/P
+neigh_modify	every 1 delay 10 check yes # default options
+#neigh_modify one 500
+
+# READ "start" data file
+read_data       data.chromatin
+#read_restart    restart.relax
+
+# calculate Debye length, used to set cutoffs
+variable T      equal 300.0  
+variable epsr   equal 80.0          # dialectric constant
+variable eps0   equal 8.8541878E-12 # C2 kg-1 m-3 s2
+variable kB     equal 1.3806505E-23 # J/K
+variable NA     equal 6.0221415E23  # Avogadro number
+variable salt   equal 150           # milli moles/L, same as moles/m^3
+variable e      equal 1.6021766E-19 # C elementary charge
+variable ldebye_inv equal "1/sqrt( v_epsr * v_eps0 * v_kB * v_T / ( 2. * v_e * v_e * v_NA * v_salt)) * 1.0E-10" # convert from m-1 to A-1
+variable ldebye_cut equal "10.0/v_ldebye_inv" # cutoff at 10 ldebye
+dielectric ${epsr}
+
+# force field variables
+variable sigma      equal 35.0
+variable lj_cut     equal 79.538 # set so that lj and debye cutoffs are the same at 150 mM
+variable lj_cut_min equal 39.286 # lj cutoff for dna-dna interactions, at sigma*2^1/6
+variable kbond      equal 0.5 # normal bonds, slope close to LJ near minimum
+variable kangle     equal 8.8 # persistence length
+variable kpair      equal 0.115 # all pair interactions
+variable kpair2     equal 0.060 # acetylated pair interactions
+variable kpairb     equal 0.180 # acetylated pair interactions + BRD2
+variable kpairh     equal 0.083 # hybrid (canonical-acetylated) pair interactions sqrt(kpair2*kpair)
+variable kH1        equal 0.7 # H1 pair interactions
+variable kmorse     equal 2.2 # k of morse potential controlling nucleosome unwrapping
+variable kmorse2    equal 1.8 # k of morse potential controlling acetylated nucleosome unwrapping
+variable alphamorse equal 0.3 # alpha of morse potential controlling nucleosome unwrapping, 0.2 value gives shape similar to LJ
+
+# define interactions
+# kBT = 1.38064852e-23x300 = 4.1419456e-24 kJ = 0.989949e-24 kCal (1 kCal = 4.184 kJ) = 0.596161 kCal/mol (Navogadro=6.022e23)
+# using kBT ~ 0.6 kCal mol (can also be obtained using 1 kBT ~ 2.5 kJ/mol)
+#pair_style      lj/cut/soft ${n_soft} ${alpha_lj} ${lj_cut}
+pair_style      lj/cut/coul/debye  ${ldebye_inv} ${lj_cut} ${ldebye_cut} # kappa cutoff_lj (cutoff_debye)
+bond_style	hybrid harmonic morse
+angle_style	cosine # E = K cos(theta) + const
+special_bonds	lj/coul 0.0 1.0 1.0 # scaling coefficients for 1-2, 1-3, and 1-4 neighbor interactions
+
+# force field parameters
+# pairs
+pair_coeff	* * ${kpair} ${sigma} # type1 type2 eps sigma (cutoff_lj cutoff_debye)
+# turn off DNA-DNA lj interactions with cutoff at 2^1/6 sigma
+pair_coeff      1 1 ${kpair} ${sigma} ${lj_cut_min} ${ldebye_cut}
+# interactions between DNA and acetylated 
+pair_coeff	1 8*19 ${kpair2} ${sigma} 
+# interactions between canonical and acetylated 
+pair_coeff	2*7 8*19 ${kpairh} ${sigma} 
+# interactions between acetylated and acetylated 
+pair_coeff	8*13 8*13 ${kpair2} ${sigma} 
+# interactions between acetylated and acetylated, mediated by BRD4
+pair_coeff	8*19 14*19  ${kpairb} ${sigma} 
+# H1 interactions, note these interactions should be weakened with acetylated nucleosomes
+pair_coeff      1 20 ${kH1} ${sigma}
+
+# bonds and angles
+#bond_coeff	* 1.0 ${sigma} # type K r0 E=K(r-r0)^2 -> kBT/2=K<(r-r0)^2> -> K=kBT/2/<(r-r0)^2>=0.6/2/(47/228)^2
+include         in.bond_settings
+angle_coeff	1 ${kangle} # cosine:         type, K;         -log(cos_theta) has a slope of     K ~2 kBT = 1.2 Kcal/mol
+
+# Sample thermodynamic info  (temperature, energy, pressure, etc.) #####
+thermo		10000
+thermo_style	custom step temp pe epair ebond
+
+# Dump configs - "simple dumpings"
+dump		1 all dcd 100000 run.dcd
+
+# set timestep from (lJ steeper than bonds)
+# tau   = sqrt(mass/eps)sigma
+# mass  = 1 grams/mole = 0.001 kg/mole = 1.66058e-27 kg (divide by Navogadro)
+# eps   = kBT = 4.1419e-21 J
+# sigma = 35.0 A = 35e-10 m
+# tau   = sqrt(1.66058/4.1419 x10-6) 35e-10 = 2.216e-12 s = 2216 fs
+# dt = 0.005 tau ~ 10 fs
+# or, using more realistic masses of 7000 grams/mole -> tau ~ 180000 fs
+
+## langevin
+fix		nve all nve   ###NVE ensemble
+#fix		com all recenter 0.0 0.0 0.0 units box
+fix		lan all langevin ${T} ${T} 1000.0 ${seed} # Langevin integrator Tstart Tstop damp rndseed
+#soft potential: increase from 0 to 1 changes every 200 steps
+#fix             fep all adapt/fep 200 pair lj/cut/soft lambda * *  v_lam
+
+timestep        10.0
+reset_timestep  0
+
+# run
+restart		10000000 ./restart.run.1 ./restart.run.2 # create restart file every 100 frames in case job is killed
+
+run		100000000
