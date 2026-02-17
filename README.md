@@ -285,4 +285,3 @@ A complete NICG simulation pipeline is therefore:
 ## LAMMPS examples
 
 Complete examples to perform simulations in LAMMPS, prepared with the above scripts, are found in the folder `examples/`.
->>>>>>> 4a340b8 (Initial commit: scripts for structure setup and backmapping examples)
