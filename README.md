@@ -37,7 +37,7 @@ Geometry:
 
 All beads use a common size parameter **σ = 35 Å**, chosen to match roughly one DNA helical turn (10.5 bp). 
 
-### Bead types / epigenetic states
+### Bead types
 
 The manuscript describes **20 bead types**, grouped into **5 interaction classes**:
 
@@ -49,12 +49,12 @@ The manuscript describes **20 bead types**, grouped into **5 interaction classes
 
 This builder encodes those states via `ac` (acetylation) and `brd4` flags per nucleosome, and an `H1` flag for whether H1 is present on that nucleosome.
 
-### Bonded interactions (connectivity)
+### Bonded interactions
 
 The potential energy includes:
 
 * **Harmonic bonds** between consecutive linker DNA beads, and between any bead pairs that are within a cutoff distance in the reference nucleosome geometry (implemented here by bonding pairs closer than ~38 Å). 
-* **Morse bonds** on the nucleosome DNA entry/exit region, replacing harmonic bonds to permit “breathing” / unwrapping dynamics. 
+* **Morse bonds** on the nucleosome DNA entry/exit region, replacing harmonic bonds to permit unwrapping dynamics. 
 * **Angle potentials** along the DNA chain to reproduce DNA bending elasticity/persistence length. Additional angles to stabilize H1 positioning when present. 
 
 ### Nonbonded interactions
