@@ -243,7 +243,7 @@ The resulting structure is a **fully atomistic chromatin fiber** consistent with
 
 * Coarse-grained chromatin PDB (`chromatin_cg.pdb`)
 * All-atom nucleosome template (`nucleosome_template.pdb`)
-* Nucleotide library (`lib/aa_A.pdb`, `aa_T.pdb`, etc.)
+* Nucleotide library (`aa_A.pdb`, `aa_T.pdb`, etc.)
 
 #### Output
 
