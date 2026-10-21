@@ -685,7 +685,7 @@ def generate_bond_settings(bonds, filename):
         mean=eq_distances[i].mean()
         key=[b.key for b in bonds if b.bond_type==i][0]
         if std>0.01:
-            RuntimeError('std of bond distances is too high')
+            print(f'# WARNING: bond type {i} {key} ({potentials[i]}): std of distances {std:.3f} > 0.01, using mean {mean:.3f}')
         eq_distances[i]=mean
     with open(filename, 'w') as fout:
         for i in eq_distances:
