@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository builds and exports **nucleosome-resolution coarse-grained chromatin fibers** in the spirit of the NICG (Nucleosome Interaction Coarse-Grained) model described in the accompanying manuscript [[Gu, C., S. Takada, and G.B. Brandani. bioRxiv (2025)](https://www.biorxiv.org/content/10.1101/2025.08.04.668597v1.abstract)]. 
+This repository builds and exports **nucleosome-resolution coarse-grained chromatin fibers** in the spirit of the NICG (Nucleosome Interaction Coarse-Grained) model described in [[Gu, C., S. Takada, and G.B. Brandani. Physics-based nucleosome-resolution modeling of epigenetic-driven chromatin domain dynamics. Nucleic Acids Res. 54(10), gkag535 (2026)](https://doi.org/10.1093/nar/gkag535)]. 
 
 The builder constructs chains of:
 
@@ -14,8 +14,9 @@ The builder constructs chains of:
 It then writes:
 
 1. a **PDB** for visualization,
-2. a **LAMMPS data file** (Atoms/Bonds/Angles), and
-3. a **bond-coefficient include file** (`in.bond_settings`) with equilibrium distances extracted from the generated geometry.
+2. a **LAMMPS data file** (Atoms/Bonds/Angles, and Dihedrals with the linker torsion),
+3. a **bond-coefficient include file** (`in.bond_settings`) with equilibrium distances extracted from the generated geometry, and
+4. optionally, a **dihedral include file** (`in.dihedral_settings`) for the linker torsion (see below).
 
 The model is intended to be simulated with **LAMMPS** using Langevin dynamics, with nonbonded Lennard-Jones + Debye–Hückel electrostatics (for charged bead types). 
 
@@ -84,11 +85,20 @@ A chain file supports these keys:
 
 * `nuc N`: Number of nucleosomes in the chain.
 
-* `ll l0 l1 ... lN`: Linker lengths in number of coarse-grained linker-DNA beads** (not bp).
-You must provide **N+1 integers**:
-`l0` = leading overhang linker beads (before nucleosome 0),
-`l1..l(N-1)` = internal linkers between nucleosomes,
-`lN` = trailing overhang linker beads (after last nucleosome).
+* Linker DNA, with one of these (only one per chain file):
+
+  * `ll l0 l1 ... lN`: Linker lengths in number of coarse-grained linker-DNA beads (not bp).
+  You must provide **N+1 integers**:
+  `l0` = leading overhang linker beads (before nucleosome 0),
+  `l1..l(N-1)` = internal linkers between nucleosomes,
+  `lN` = trailing overhang linker beads (after last nucleosome).
+  Not allowed with the linker torsion.
+
+  * `llbp L0 L1 ... LN`: The same N+1 linker lengths in bp. Between two nucleosomes L = NRL - 147, with NRL the distance between their dyads.
+
+  * `nucpos s1 ... sN` and `genlen G`: First bp of each nucleosome (counted from 1) and total DNA length in bp. Nucleosome i covers bp si to si+146, so this is the same as `llbp s1-1 s2-s1-147 ... G-sN-146`.
+
+  Each nucleosome holds 147 bp of DNA, and a linker of L bp is made of round(L/10.5) beads. With `nuc 0` the chain is DNA only, given by one `ll` or `llbp` value or by `genlen` alone.
 
 * `H1 0/1 0/1 ...`: Linker histone flags (length N; optional; defaults to all 0).
 
@@ -127,7 +137,34 @@ For each run (potentially multiple chains appended):
 
 * `in.bond_settings` (or `-b`): a helper file that writes LAMMPS `bond_coeff` lines using the equilibrium distances measured from the generated geometry, to be included in the LAMMPS input file for the simulation.
 
+* `in.dihedral_settings` (or `-t`), only with the linker torsion: the `dihedral_style` and `dihedral_coeff` lines of the torsion, to be included in the LAMMPS input after the bond settings. The data file then also lists the dihedrals.
+
 At the end, the script recenters the whole structure by subtracting the overall center-of-mass.
+
+### 5) Linker torsion (optional)
+
+The bead model has no DNA twist, so nothing in it ties the rotation of one nucleosome relative to the next to the twist of the linker DNA. The builder can add this as one dihedral per internal linker, through H2A and the last core DNA bead of nucleosome i and the first core DNA bead and H2A of nucleosome i+1. The equilibrium angle and the stiffness depend on the linker length in bp, so the linkers must be given with `llbp` or `nucpos`.
+
+The torsion is switched on by `-tw` or by any of these options (default in brackets):
+
+* `-twh`: helical repeat of the linker DNA [10.5 bp/turn]
+* `-twN`: nucleosomal DNA length used by the torsion [146 bp]. The bead model is not changed: its nucleosomes always hold 147 bp.
+* `-twC`: twist persistence length of the linker DNA [75 nm]
+* `-twsL`: standard deviation of the linker length from twist defects [1 bp]
+* `-t`: output file [in.dihedral_settings]
+
+For a linker of L bp the free DNA has n = L + 148 - N base-pair steps. The twist accumulated over the linker is taken as Gaussian, with mean D0 = c0 + 360 n/h degrees and variance n 0.34/C + (2π σL/h)² rad². The potential is the von Mises with the same first circular moment, κ kT [1 - cos(D - D0)], multiplied by 1 - cos⁸θ of the two bond angles of the dihedral so that it vanishes when three beads are collinear. There is one dihedral type per distinct linker length.
+
+The phase c0 = 42.20° is fixed in the code (`TORSION_C0`). It is the dihedral of a reference dinucleosome made of two copies of the 1KX5 crystal structure (147 bp):
+
+1. the base-pair frames of the 1KX5 DNA are computed (3DNA standard reference frames);
+2. the second copy is placed so that its first base pair follows the last base pair of the first copy by one ideal step of the 10.5-bp repeat (twist 34.29°, rise 3.4 Å), i.e. with no linker (n = 1);
+3. a NICG nucleosome is mapped on each copy as in `nicg_backmapping.py` (12 core DNA beads on 12 base-pair centres of the central 127 bp);
+4. c0 is the dihedral of the mapped NICG beads minus 34.29°.
+
+Other crystal structures give other values, because the end base pairs sit differently on the octamer: with this c0, 1AOI (146 bp) and 3LZ0 (145 bp, 601 sequence) correspond to N = 145.7 and 144.1.
+
+The coefficients use the LAMMPS variable `T` (in K), which must be defined before `in.dihedral_settings` is included. The style is `dihedral_style spherical` (LAMMPS package EXTRA-MOLECULE). It has no OPENMP or GPU version, so CPU runs are 10-25% slower. In a periodic box the communication cutoff must be longer than the dihedrals, e.g. `comm_modify cutoff 400.0` (see `examples/n12nrl189_torsion`).
 
 ---
 
@@ -155,6 +192,8 @@ Run:
 ```bash
 python nicg_chromatin_builder.py -f chains.txt -o chromatin.pdb -d data.chromatin -b in.bond_settings
 ```
+
+`python nicg_chromatin_builder.py -h` lists all options and describes the input files.
 
 ---
 
@@ -189,6 +228,7 @@ Global target fractions are recovered statistically.
 Internal linker lengths are sampled one by one from a truncated normal distribution (in bp).
 Negative linker lengths are rejected.
 The input total fiber length is matched exactly by adjusting the trailing overhang.
+The chain file gives the nucleosome positions in bp, and the builder converts the linkers to beads.
 
 **Builder-compatible output**
 
@@ -196,7 +236,8 @@ The script writes a builder-compatible output that defines the chromatin fiber:
 
 ```
 nuc N
-ll  l0 l1 ... lN
+nucpos s1 ... sN
+genlen G
 H1  0/1 ...
 ac  0/1 ...
 brd4 0/1 ...
@@ -284,4 +325,9 @@ A complete NICG simulation pipeline is therefore:
 
 ## LAMMPS examples
 
-Complete examples to perform simulations in LAMMPS, prepared with the above scripts, are found in the folder `examples/`.
+Complete examples to perform simulations in LAMMPS, prepared with the above scripts, are found in the folder `examples/`:
+
+* `dna`: DNA only (50 beads)
+* `n12nrl189`: regular 12-nucleosome fiber, NRL 189 bp
+* `n12nrl189_torsion`: the same fiber with the linker torsion
+* `fiber_100kb`: 100-kb fiber with epigenetic states, generated by `nicg_define_fiber.py`

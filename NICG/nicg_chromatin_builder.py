@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import numpy as np
 import sys
@@ -70,6 +70,22 @@ class Angle:
         print('index: {}'.format(self.index))
         print('type: {}'.format(self.bond_type))
         print('indices: {} {} {}'.format(self.index1,self.index2,self.index3))
+        print('')
+
+class Dihedral:
+    def __init__(self, index, dihedral_type, index1, index2, index3, index4, linker_bp=0.):
+        self.index = index                  # Dihedral index starting from 1
+        self.dihedral_type = dihedral_type  # Dihedral type, one per distinct linker length
+        self.index1 = index1                # index of atom 1
+        self.index2 = index2                # index of atom 2
+        self.index3 = index3                # index of atom 3
+        self.index4 = index4                # index of atom 4
+        self.linker_bp = linker_bp          # linker length in bp, dyad spacing - 147 (the free linker of the torsion is L + 147 - N bp)
+    def print(self):
+        print('index: {}'.format(self.index))
+        print('type: {}'.format(self.dihedral_type))
+        print('indices: {} {} {} {}'.format(self.index1,self.index2,self.index3,self.index4))
+        print('linker_bp: {}'.format(self.linker_bp))
         print('')
 
 def compute_spline_path(cg_coords):
@@ -243,10 +259,45 @@ def pdbOut(atom, scale=1.0):
     )
 
 
-# Function to read input parameters from a file
-def read_input(filename):
+# DNA of a NICG nucleosome (14 beads) and of one linker bead
+NUC_BP = 147
+BP_PER_BEAD = 10.5
+
+def linker_beads(L):
+    # number of linker beads for a linker of L bp: round(L/10.5), halves rounded up
+    return int(np.floor(L/BP_PER_BEAD+0.5))
+
+def nucpos_to_llbp(nucpos, genlen, Nnuc, filename=''):
+    # linker lengths in bp (as llbp) from the first bp of each nucleosome (1-based; nucleosome i covers
+    # nucpos[i] .. nucpos[i]+146) and the total DNA length: s1-1, s(i+1)-s(i)-147, genlen-sN-146
+    if len(nucpos)!=Nnuc:
+        raise RuntimeError('{}: nucpos has {} values for {} nucleosomes'.format(filename, len(nucpos), Nnuc))
+    if Nnuc==0:
+        return [float(genlen)]
+    if nucpos[0]<1:
+        raise RuntimeError('{}: nucpos are 1-based, the first is {}'.format(filename, nucpos[0]))
+    for i in range(Nnuc-1):
+        if nucpos[i+1]-nucpos[i]<NUC_BP:
+            raise RuntimeError('{}: nucleosomes {} and {} overlap (nucpos {} and {}; the spacing must be at least {} bp)'.format(
+                filename, i+1, i+2, nucpos[i], nucpos[i+1], NUC_BP))
+    if genlen<nucpos[-1]+NUC_BP-1:
+        raise RuntimeError('{}: genlen {} ends before the last nucleosome (bp {}-{})'.format(filename, genlen, nucpos[-1], nucpos[-1]+NUC_BP-1))
+    return [float(nucpos[0]-1)] + [float(nucpos[i+1]-nucpos[i]-NUC_BP) for i in range(Nnuc-1)] + [float(genlen-nucpos[-1]-NUC_BP+1)]
+
+def integer_values(tokens, key, filename):
+    try:
+        return [int(x) for x in tokens]
+    except ValueError:
+        raise RuntimeError('{}: {} takes integers (bp), got {}'.format(filename, key, ' '.join(tokens)))
+
+# Function to read input parameters from a file (the format is described in HELP_INPUT, printed by -h)
+def read_input(filename, torsion=False):
     Nnuc = -1
     Llinkers = []
+    Llinkers_bp = []
+    nucpos = []
+    genlen = None
+    linker_keys = [] # ll, llbp, nucpos, genlen as found in the file
     H1s = []
     acetylations = []
     brd4s = []
@@ -255,11 +306,25 @@ def read_input(filename):
         lines = f.readlines()
         for l in lines:
             tokens=l.strip().split()
+            if len(tokens)==0: # empty line
+                continue
             key=tokens[0]
             if key=='nuc': # number of nucleosomes
                 Nnuc = int(tokens[1])
-            elif key=='ll': # linker lengths
+            elif key=='ll': # linker lengths in beads
                 Llinkers = list(map(int, tokens[1:]))
+                linker_keys.append(key)
+            elif key=='llbp': # linker lengths in bp (between nucleosomes: dyad spacing - 147)
+                Llinkers_bp = list(map(float, tokens[1:]))
+                linker_keys.append(key)
+            elif key=='nucpos': # first bp of each nucleosome (1-based)
+                nucpos = integer_values(tokens[1:], key, filename)
+                linker_keys.append(key)
+            elif key=='genlen': # total DNA length in bp
+                if len(tokens)!=2:
+                    raise RuntimeError('{}: genlen takes one value'.format(filename))
+                genlen = integer_values(tokens[1:], key, filename)[0]
+                linker_keys.append(key)
             elif key=='H1': # linker histones (present or not)
                 H1s = [bool(int(val)) for val in tokens[1:]]
             elif key=='ac': # acetylation (present or not)
@@ -272,7 +337,35 @@ def read_input(filename):
             elif key[0]=='#':
                 continue
             else:
-                raise RuntimeError('key',key,'not recognized, keys should be nuc, ll, H1, ac, brd4, or cg')
+                raise RuntimeError('key',key,'not recognized, keys should be nuc, ll, llbp, nucpos, genlen, H1, ac, brd4, or cg')
+    # linker DNA: exactly one of ll (beads), llbp (bp) or nucpos + genlen (bp), each given once; llbp and nucpos are
+    # converted to linker lengths in bp, which set the number of beads (linker_beads) and the linker torsion
+    if Nnuc<0:
+        raise RuntimeError('{}: nuc (number of nucleosomes) is missing'.format(filename))
+    for k in set(linker_keys):
+        if linker_keys.count(k)>1:
+            raise RuntimeError('{}: {} is given more than once'.format(filename, k))
+    if Nnuc==0 and 'genlen' in linker_keys and 'nucpos' not in linker_keys: # DNA only: genlen alone
+        linker_keys.append('nucpos')
+    if 'nucpos' in linker_keys and 'genlen' not in linker_keys:
+        raise RuntimeError('{}: nucpos needs genlen, the total DNA length in bp'.format(filename))
+    if 'genlen' in linker_keys and 'nucpos' not in linker_keys:
+        raise RuntimeError('{}: genlen goes with nucpos'.format(filename))
+    given = [k for k in ('ll','llbp','nucpos') if k in linker_keys]
+    if len(given)!=1:
+        raise RuntimeError('{}: give the linker DNA with exactly one of ll, llbp or nucpos + genlen (found: {})'.format(
+            filename, ', '.join(given) if len(given)>0 else 'none'))
+    if given[0]=='ll':
+        if torsion:
+            raise RuntimeError('{}: the linker torsion needs the linker lengths in bp: give llbp or nucpos + genlen instead of ll'.format(filename))
+        Llinkers_bp = [BP_PER_BEAD*L for L in Llinkers]
+    else:
+        if given[0]=='nucpos':
+            Llinkers_bp = nucpos_to_llbp(nucpos, genlen, Nnuc, filename)
+        if len(Llinkers_bp)>0 and min(Llinkers_bp)<0:
+            raise RuntimeError('llbp<0')
+        Llinkers = [linker_beads(L) for L in Llinkers_bp]
+    linker_input = given[0]
     # check consistency
     if Nnuc<0:
         raise RuntimeError('Nnuc<0')
@@ -297,8 +390,8 @@ def read_input(filename):
             raise RuntimeError('len(H1s)!=Nnuc')
         if len(acetylations)!=Nnuc:
             raise RuntimeError('len(acetylations)!=Nnuc')
-    
-    return Nnuc, Llinkers, H1s, acetylations, brd4s, cg_coords
+
+    return Nnuc, Llinkers, Llinkers_bp, H1s, acetylations, brd4s, cg_coords, linker_input
 
 # Function to generate a reference nucleosome
 # modified by GU: now takes rotation matrix instead of angle as input
@@ -699,6 +792,104 @@ def generate_bond_settings(bonds, filename):
                 raise RuntimeError('bond potential not recognized, should be harmonic or morse')
     print(f'# bond settings distances written to {filename}')
 
+# Linker torsion: orientational constraint between consecutive nucleosomes from the twist of the linker DNA
+# (summary in README.md, section "Linker torsion"). Four physical parameters, with the defaults below:
+#   h    helical repeat of the linker DNA (bp/turn); twist per bp tw = 360/h
+#   N    nucleosomal DNA length (bp); the free linker has n = L + 148 - N steps, L = dyad spacing - 147
+#   C    twist persistence length of the linker DNA (nm)
+#   sL   standard deviation (bp) of the linker length caused by twist defects in the two nucleosomes
+# The accumulated twist across the linker is the sum of two independent Gaussians, the twist of the n free steps
+# (mean tw*n, variance n*a/C) and tw times the length fluctuation (mean 0, variance (tw*sL)^2), plus the phase c0
+# (below). The NICG dihedral D(H2A7, DNC20 | DNC9', H2A0') is this twist wrapped on the circle, a wrapped normal with
+#   D0      = c0 + tw*n
+#   sigma^2 = n*a/C + (tw*sL)^2
+# replaced by the von Mises distribution with the same first circular moment, I1(kappa)/I0(kappa) = exp(-sigma^2/2).
+# Boltzmann inversion gives U = kappa kT [1 - cos(D - D0)], times the flat-top factor below.
+# The phase c0 comes from a reference dinucleosome built from the crystal structure 1KX5 (147 bp):
+#   1. base-pair frames of the 1KX5 DNA (3DNA standard reference frames);
+#   2. a second copy of 1KX5 placed so that the frame of its first bp is that of the last bp of the first copy
+#      followed by one ideal step of the 10.5-bp repeat (twist 34.2857 deg, rise 3.4 A): zero linker, n = 1 step;
+#   3. a NICG nucleosome mapped on each copy as in nicg_backmapping.py (the 12 core DNA beads on the centres of the
+#      middle bp of 12 equal blocks of the central 127 bp);
+#   4. c0 = D - 34.2857 deg, with D the dihedral of the mapped NICG beads.
+# The four ways of joining the two DNA ends of 1KX5 agree within 0.1 deg. 1AOI (146 bp) and 3LZ0 (145 bp, 601) give
+# other values, from the orientation of their end base pairs: with this c0 they correspond to N = 145.7 and 144.1.
+TORSION_H      = 10.5     # bp/turn, default helical repeat (twist 34.29 deg/bp; DNA in solution: 10.4-10.54 bp/turn)
+TORSION_N      = 146      # bp, default nucleosomal DNA length (middle of the 145-147 bp of crystal structures)
+TORSION_C      = 75.      # nm, default twist persistence length of a free linker (zero-force estimates 55-85 nm)
+TORSION_SL     = 1.0      # bp, default sd of the linker length from twist defects (0 = no defects)
+TORSION_C0     = 42.20    # deg, phase: D - tw of the 1KX5 zero-linker dinucleosome (above)
+TORSION_RISE   = 0.34     # nm/bp
+TORSION_FLAT_M = 4        # bond-angle factor f(theta) = 1 - cos^(2m)(theta) of the spherical style; fixed, not an option
+
+def torsion_parameters(L, h=TORSION_H, N=TORSION_N, C=TORSION_C, sL=TORSION_SL):
+    # mean D0 (deg) and sd (rad) of the linker dihedral for a linker of L bp (dyad spacing - 147)
+    tw = 2.*np.pi/h
+    n = L + 148. - N
+    var = n*TORSION_RISE/C + (tw*sL)**2
+    if n < 0 or var <= 0:
+        raise RuntimeError('linker torsion undefined for L = {:g} bp, N = {:g} bp, sL = {:g} bp (n = {:g} free steps)'.format(L, N, sL, n))
+    return TORSION_C0 + np.degrees(tw)*n, np.sqrt(var)
+
+def von_mises_kappa(sd):
+    # kappa of the von Mises distribution with the first circular moment of the wrapped normal of sd (rad):
+    # I1(kappa)/I0(kappa) = exp(-sd^2/2), solved by bracketing (the left side increases from 0 to 1)
+    from scipy.special import ive
+    from scipy.optimize import brentq
+    R = np.exp(-0.5*sd*sd)
+    return brentq(lambda k: ive(1,k)/ive(0,k)-R, 1e-6, 1e9)
+
+# The plain von Mises term has forces ~ 1/sin(theta) when the bond angle H2A7-DNC20-DNC9' or
+# DNC20-DNC9'-H2A0' approaches 0 or 180 deg; such near-collinear frames occur in 12-mers and crash the
+# run. The default form multiplies the term by f(theta1) f(theta2), f = 1 - cos^(2m)(theta), which is ~1
+# where the dihedral is well defined and vanishes smoothly at 0 and 180 deg, as a sum of (m+1)^2
+# dihedral_style spherical terms: f(theta) = a0 - sum_k c_k cos(2k theta). Where f < 1 the torsion is
+# weaker, so P(D) is slightly broader than the von Mises target (kappa_eff/kappa, predicted exactly by
+# reweighting torsion-free simulations). m = 4 (25 terms, fixed): kappa_eff/kappa 0.98-0.90 in
+# 12-mers for L = 20-60, ~20% extra cost per step.
+def flat_top_terms(m):
+    # (coefficient, L, v) of the spherical factors Theta = v - cos(L theta) whose sum is f(theta)
+    from math import comb
+    terms = [(1. - comb(2*m, m)/4.**m, 0, 2.)]                              # 2 - cos(0) = 1
+    terms += [(2.*comb(2*m, m-k)/4.**m, 2*k, 0.) for k in range(1, m+1)]   # -cos(2k theta)
+    return terms
+
+def spherical_coeff(t, kappa, D0):
+    # dihedral_coeff for E = kappa kT [1 - cos(phi - D0)] f(theta1) f(theta2), dihedral_style spherical
+    # (per term: C K a u L b v M c w, Phi = u - cos(K(phi - a)), Theta1 = v - cos(L(theta1 - b)), Theta2 = w - cos(M(theta2 - c)))
+    terms = flat_top_terms(TORSION_FLAT_M)
+    out = []
+    for c1, L1, v1 in terms:
+        for c2, L2, v2 in terms:
+            out.append('$(0.0019872041*v_T*{:.8f}) 1 {:.3f} 1 {} 0 {:g} {} 0 {:g}'.format(kappa*c1*c2, (D0+180.)%360.-180., L1, v1, L2, v2))
+    return 'dihedral_coeff {} {} &\n  '.format(t, len(out)) + ' &\n  '.join(out)
+
+# one dihedral type per distinct linker length
+def set_dihedral_types(dihedrals):
+    lengths = sorted(set([round(d.linker_bp,3) for d in dihedrals]))
+    types = {L:i+1 for i,L in enumerate(lengths)}
+    for i,d in enumerate(dihedrals):
+        d.index = i+1
+        d.dihedral_type = types[round(d.linker_bp,3)]
+
+def generate_dihedral_settings(dihedrals, filename, h=TORSION_H, N=TORSION_N, C=TORSION_C, sL=TORSION_SL):
+    Ntypes = max([d.dihedral_type for d in dihedrals])
+    tw = 360./h
+    with open(filename, 'w') as fout:
+        fout.write('# linker torsion: dihedral_style spherical, E = kappa kT [1 - cos(phi - D0)] f(theta1) f(theta2), f = 1 - cos^{}(theta)\n'.format(2*TORSION_FLAT_M))
+        fout.write('# helical repeat {:g} bp/turn (twist {:.4f} deg/bp), nucleosomal DNA {:g} bp, C = {:g} nm, linker-length sd {:g} bp\n'.format(h, tw, N, C, sL))
+        fout.write('# D0 = {:g} + twist n deg, n = L + 148 - N; sd^2 = n {:g}/C + (twist sd_L)^2 = n {:.6f} + {:.6f} rad^2; I1(kappa)/I0(kappa) = exp(-sd^2/2)\n'.format(
+            TORSION_C0, TORSION_RISE, TORSION_RISE/C, (np.radians(tw)*sL)**2))
+        fout.write('# K = kappa kT uses the LAMMPS variable T (K)\n')
+        fout.write('dihedral_style spherical\n')
+        for t in range(1,Ntypes+1):
+            L = [d.linker_bp for d in dihedrals if d.dihedral_type==t][0]
+            D0, sd = torsion_parameters(L, h, N, C, sL)
+            kappa = von_mises_kappa(sd)
+            fout.write('# L = {:g} bp, D0 = {:.2f} deg, sd = {:.2f} deg, kappa = {:.4f}\n{}\n'.format(
+                L, (D0+180.)%360.-180., np.degrees(sd), kappa, spherical_coeff(t, kappa, D0)))
+    print('# dihedral settings ({} type{}) written to {}'.format(Ntypes, 's'*(Ntypes>1), filename))
+
 # ensure indices go from 1 to Nbond_types
 # and types go from 1 to Ntypes
 def fix_bonds(bonds):
@@ -782,10 +973,13 @@ def initial_linker_direction_for_z_rise(bead_distance=35.0, dz_per_bead=3.53):
     return np.array([dx, 0.0, dz], float)
 
 # Main function to build the chromatin fiber
-def build_chromatin(Nnuc,Llinkers,cg_coords=[],gamma_dna_condensation=1.,gamma_nuc_condensation=1.,acetylations=[],H1s=[],brd4s=[],charge_H1=0.):
+def build_chromatin(Nnuc,Llinkers,cg_coords=[],gamma_dna_condensation=1.,gamma_nuc_condensation=1.,acetylations=[],H1s=[],brd4s=[],charge_H1=0.,Llinkers_bp=[]):
     chromatin = []
     bonds=[]  # type,id1,id2
     angles=[] # type,id1,id2,id3
+    nucleosomes=[] # atoms of each nucleosome, to define the linker torsion dihedrals
+    if len(Llinkers_bp)==0:
+        Llinkers_bp = [10.5*L for L in Llinkers]
     atom_index = 1
     mol_index = 1
     res_index = 1
@@ -909,6 +1103,7 @@ def build_chromatin(Nnuc,Llinkers,cg_coords=[],gamma_dna_condensation=1.,gamma_n
         bonds.extend(bonds_nuc)
         angles.extend(angles_nuc)
         chromatin.extend(nucleosome)
+        nucleosomes.append(nucleosome)
 
         last_dna_atoms = [atom for atom in nucleosome if atom.name[0]=='D']
         # Store current nucleosome's first DNA bead position for linker adjustment
@@ -1050,7 +1245,16 @@ def build_chromatin(Nnuc,Llinkers,cg_coords=[],gamma_dna_condensation=1.,gamma_n
     fix_bonds(bonds)
     fix_bonds(angles)
 
-    return chromatin,bonds,angles
+    # linker torsion: one dihedral per internal linker, H2A(7) and DNC(20) of nuc i, DNC(9) and H2A(0) of nuc i+1
+    # (beads selected by position, so acetylated/BRD4 nucleosomes and H1 are handled the same way)
+    dihedrals=[]
+    for i in range(Nnuc-1):
+        n1=nucleosomes[i]
+        n2=nucleosomes[i+1]
+        dihedrals.append(Dihedral(index=i+1, dihedral_type=0, index1=n1[7].index, index2=n1[20].index,
+                                  index3=n2[9].index, index4=n2[0].index, linker_bp=Llinkers_bp[i+1]))
+
+    return chromatin,bonds,angles,dihedrals
 
 # Main function to build the DNA alone
 def build_only_linker_dna(Nlinker, gamma_dna_condensation=1.):
@@ -1088,7 +1292,7 @@ def write_pdb(chromatin, filename, scale=1.0):
     print(f'# PDB file written to {filename}')
 
 # Function to LAMMPS data file
-def write_lammps_data(chromatin, bonds, angles, filename, halfbox=-1):
+def write_lammps_data(chromatin, bonds, angles, filename, halfbox=-1, dihedrals=[]):
     atom_indices= [a.index for a in chromatin]
     bond_indices= [b.index for b in bonds]
     angle_indices=[b.index for b in angles]
@@ -1121,10 +1325,16 @@ def write_lammps_data(chromatin, bonds, angles, filename, halfbox=-1):
         fout.write('LAMMPS data file\n\n')
         fout.write('{} atoms\n'.format(len(chromatin)))
         fout.write('{} bonds\n'.format(len(bonds)))
-        fout.write('{} angles\n\n'.format(len(angles)))
+        fout.write('{} angles\n'.format(len(angles)))
+        if len(dihedrals)>0:
+            fout.write('{} dihedrals\n'.format(len(dihedrals)))
+        fout.write('\n')
         fout.write('{} atom types\n'.format(Natom_types))
         fout.write('{} bond types\n'.format(Nbond_types))
-        fout.write('{} angle types\n\n'.format(Nangle_types))
+        fout.write('{} angle types\n'.format(Nangle_types))
+        if len(dihedrals)>0:
+            fout.write('{} dihedral types\n'.format(max([d.dihedral_type for d in dihedrals])))
+        fout.write('\n')
         fout.write('-{:.1f} {:.1f} xlo xhi\n'.format(halfbox[0],halfbox[0]))
         fout.write('-{:.1f} {:.1f} ylo yhi\n'.format(halfbox[1],halfbox[1]))
         fout.write('-{:.1f} {:.1f} zlo zhi\n\n'.format(halfbox[2],halfbox[2]))
@@ -1145,6 +1355,11 @@ def write_lammps_data(chromatin, bonds, angles, filename, halfbox=-1):
         for b in angles:
             fout.write('{} {} {} {} {}\n'.format(b.index,b.bond_type,b.index1,b.index2,b.index3))
         fout.write('\n')
+        if len(dihedrals)>0:
+            fout.write('Dihedrals\n\n')
+            for d in dihedrals:
+                fout.write('{} {} {} {} {} {}\n'.format(d.index,d.dihedral_type,d.index1,d.index2,d.index3,d.index4))
+            fout.write('\n')
     print(f'# LAMMPS data file written to {filename}')
 
 # function to copy the fiber along x, y, z on a lattice
@@ -1265,9 +1480,9 @@ def copy_fiber(chromatin, bonds, angles, copies):
 
 # function to append new chain to existing list of chromatin, bonds and angles
 # written by GU
-def append_chromatin(chromatin_old,bonds_old,angles_old,chromatin,bonds,angles):
-    if len(chromatin_old)==0: 
-        return chromatin,bonds,angles
+def append_chromatin(chromatin_old,bonds_old,angles_old,chromatin,bonds,angles,dihedrals_old=[],dihedrals=[]):
+    if len(chromatin_old)==0:
+        return chromatin,bonds,angles,dihedrals
     else:
         N_atom_old = len(chromatin_old)
         N_bond_old = len(bonds_old)
@@ -1304,8 +1519,16 @@ def append_chromatin(chromatin_old,bonds_old,angles_old,chromatin,bonds,angles):
             angle.index2   = angle.index2 + atom_index_offset
             angle.index3   = angle.index3 + atom_index_offset
         angles_new = angles_old + angles
-        
-        return chromatin_new,bonds_new,angles_new
+
+        # atom ids in each dihedral (dihedral ids and types are set at the end, see set_dihedral_types)
+        for d in dihedrals:
+            d.index1      = d.index1 + atom_index_offset
+            d.index2      = d.index2 + atom_index_offset
+            d.index3      = d.index3 + atom_index_offset
+            d.index4      = d.index4 + atom_index_offset
+        dihedrals_new = dihedrals_old + dihedrals
+
+        return chromatin_new,bonds_new,angles_new,dihedrals_new
         
 # function to Read CG coodinates (backbone of the chromatin structure)
 # written by GU
@@ -1329,34 +1552,135 @@ def read_chains(filename):
 
 ########################################################
 
+# Input files and lengths, printed by -h after the options
+HELP_INPUT = """
+input files:
+  chains file (-f)   one line "chain <chain file>" per chain; the chains are built into one system (chains
+                     without a cg backbone are shifted by 300 A along x from each other). # starts a comment line.
+  chain file         one key per line followed by its values; # starts a comment line.
+    nuc N              number of nucleosomes (N = 0: a DNA chain without nucleosomes)
+    linker DNA, exactly one of:
+    ll l0 l1 .. lN     N+1 linker lengths in beads (integers): leading end, the N-1 linkers between
+                       nucleosomes, trailing end. Not allowed with the linker torsion. N = 0: one value.
+    llbp L0 L1 .. LN   N+1 linker lengths in bp (>= 0, may be non-integer), in the same order. Between two
+                       nucleosomes L = NRL - 147, NRL = distance between their dyads in bp. N = 0: one value.
+    nucpos s1 .. sN    first bp of each nucleosome (integers, counted from 1); nucleosome i covers bp
+    genlen G           si .. si+146. G: the total DNA length in bp. The same as llbp s1-1 s2-s1-147 ..
+                       sN-s(N-1)-147 G-sN-146. N = 0: genlen G alone.
+    H1 0/1 x N         linker histone H1 on each nucleosome (default: all 0)
+    ac 0/1 x N         acetylated nucleosomes (default: all 0)
+    brd4 0/1 x N       BRD4-bound nucleosomes (default: all 0)
+    cg FILE            backbone (one x y z per line, A): the nucleosomes are placed along a spline through
+                       these points instead of along a straight fiber
+
+lengths:
+  Every nucleosome of the bead model holds 147 bp of DNA (14 beads). A linker of L bp gets round(L/10.5)
+  beads of 10.5 bp (halves rounded up), whatever the torsion options.
+  The linker torsion uses the exact L of each linker between two nucleosomes. With -twN N bp bound per
+  nucleosome the free linker has n = L + 148 - N base-pair steps (n = L + 1 for N = 147). The dihedral
+  D(H2A, last core DNA bead of nucleosome i | first core DNA bead, H2A of nucleosome i+1) gets
+    U = kappa kT [1 - cos(D - D0)] f(theta1) f(theta2),   D0 = C0VALUE + n 360/h deg,
+    sd^2 = n 0.34/C + (sL 2 pi/h)^2 rad^2,   I1(kappa)/I0(kappa) = exp(-sd^2/2),   f = 1 - cos^8(theta)
+  (theta1, theta2: the two bond angles of the dihedral), with h, N, C, sL from -twh, -twN, -twC, -twsL.
+  The data file then has a Dihedrals section, one dihedral type per distinct L, and the file of -t holds
+  their coefficients (dihedral_style spherical, LAMMPS package EXTRA-MOLECULE; units real). They use the
+  LAMMPS variable T (K), which must be defined before that file is included. The ends have no torsion.
+
+example: 3 nucleosomes at NRL 189 bp with 10-bp ends; these chain files build the same structure
+  nuc 3              nuc 3                      nuc 3
+  llbp 10 42 42 10   nucpos 11 200 389          ll 1 4 4 1      (torsion off only)
+                     genlen 545
+  nicg_chromatin_builder.py -f chains.txt -o chromatin.pdb -d data.chromatin -b in.bond_settings -hbox 400 \\
+    -twh 10.5 -twN 146 -twC 75 -twsL 1 -t in.dihedral_settings
+""".replace('C0VALUE', '%.2f' % TORSION_C0)
+
+def parse_arguments(argv=None):
+    import argparse
+    p = argparse.ArgumentParser(prog='nicg_chromatin_builder.py', allow_abbrev=False, epilog=HELP_INPUT,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='Builds a NICG chromatin system: PDB, LAMMPS data file (units real, atom_style full) and bond '
+                    'coefficients; with the linker torsion also the dihedral coefficients.')
+    g = p.add_argument_group('input and output')
+    g.add_argument('-f', dest='input_file', default='chains.txt', metavar='FILE', help='chains file, see below (default: %(default)s)')
+    g.add_argument('-o', dest='pdb_file', default='chromatin.pdb', metavar='FILE', help='PDB output (default: %(default)s)')
+    g.add_argument('-d', dest='data_file', default='data.chromatin', metavar='FILE', help='LAMMPS data file output (default: %(default)s)')
+    g.add_argument('-b', dest='bond_file', default='in.bond_settings', metavar='FILE',
+                   help='bond coefficients to include in the LAMMPS input (default: %(default)s)')
+    g.add_argument('-hbox', dest='halfbox', type=float, default=-1., metavar='A',
+                   help='half the edge of the cubic box (A); <= 0: the box around the structure plus 35 A (default: %(default)g)')
+    g.add_argument('-scalepdb', dest='scale_pdb', type=float, default=1.0, metavar='X', help='scale factor of the PDB coordinates (default: %(default)g)')
+    g.add_argument('-cg', dest='cg_file', default='', metavar='FILE', help='not used (the backbone is the cg key of a chain file)')
+    g.add_argument('-ref', dest='ref', default='', metavar='FILE', help='not used')
+    q = p.add_argument_group('charges')
+    q.add_argument('-gdna', dest='gamma_dna_condensation', type=float, default=0.35, metavar='X',
+                   help='linker DNA bead charge -X 2 10.5 e (counterion condensation; default: %(default)g)')
+    q.add_argument('-gnuc', dest='gamma_nuc_condensation', type=float, default=0.0, metavar='X',
+                   help='nucleosomal DNA bead charge -X 2 10.5 e (default: %(default)g)')
+    q.add_argument('-qH1', dest='charge_H1', type=float, default=10., metavar='Q', help='charge of H1 (e), half on each of its two beads (default: %(default)g)')
+    t = p.add_argument_group('linker torsion', 'off unless -tw or one of -twh, -twN, -twC, -twsL is given; see "lengths" below')
+    t.add_argument('-tw', dest='torsion', action='store_true', help='switch the torsion on (with the defaults of the options not given)')
+    t.add_argument('-t', dest='dihedral_file', default='in.dihedral_settings', metavar='FILE',
+                   help='dihedral coefficients to include in the LAMMPS input (default: %(default)s); does not switch the torsion on')
+    t.add_argument('-twh', dest='twist_h', type=float, default=None, metavar='H', help='helical repeat of the linker DNA (bp/turn; default: %g)' % TORSION_H)
+    t.add_argument('-twN', dest='twist_N', type=float, default=None, metavar='N',
+                   help='nucleosomal DNA length (bp) in the torsion only; the bead model always has 147 bp (default: %g)' % TORSION_N)
+    t.add_argument('-twC', dest='twist_C', type=float, default=None, metavar='C', help='twist persistence length of the linker DNA (nm; default: %g)' % TORSION_C)
+    t.add_argument('-twsL', dest='twist_sL', type=float, default=None, metavar='SL',
+                   help='sd of the linker length from twist defects (bp; 0: none; default: %g)' % TORSION_SL)
+    # argparse would also accept prefixes of the options (-scale for -scalepdb) and values glued to one-letter options
+    # (-twn read as -t wn): accept only the options written in full, each followed by its value
+    argv = sys.argv[1:] if argv is None else list(argv)
+    takes_value = {o: a.nargs!=0 for a in p._actions for o in a.option_strings}
+    i = 0
+    while i<len(argv):
+        if argv[i] not in takes_value:
+            p.error('unrecognized argument {} (options are written in full, each followed by its value)'.format(argv[i]))
+        i += 2 if takes_value[argv[i]] else 1
+    args = p.parse_args(argv)
+    twist = (args.twist_h, args.twist_N, args.twist_C, args.twist_sL)
+    args.torsion = args.torsion or any(x is not None for x in twist)
+    for name, x, default in zip(('twist_h', 'twist_N', 'twist_C', 'twist_sL'), twist, (TORSION_H, TORSION_N, TORSION_C, TORSION_SL)):
+        if x is None:
+            setattr(args, name, default)
+    return args
+
+def print_linkers(Llinkers_bp, Llinkers, linker_input):
+    # linker lengths of one chain, in bp and beads (in beads only if given as ll); one line per distinct length
+    if linker_input=='ll':
+        print('# linker DNA, beads (ll): leading end {}, trailing end {}'.format(Llinkers[0], Llinkers[-1]))
+        internal = [(None, nb) for nb in Llinkers[1:-1]]
+    else:
+        print('# linker DNA, bp ({}) -> beads: leading end {:g} -> {}, trailing end {:g} -> {}'.format(
+            linker_input, Llinkers_bp[0], Llinkers[0], Llinkers_bp[-1], Llinkers[-1]))
+        internal = list(zip(Llinkers_bp[1:-1], Llinkers[1:-1]))
+    distinct = sorted(set(internal), key=lambda x: (x[1], x[0] if x[0] is not None else 0))
+    if len(distinct)==0:
+        return
+    if len(distinct)<=12:
+        for L, nb in distinct:
+            n = internal.count((L, nb))
+            if L is None:
+                print('#   {} linker{} of {} bead{}'.format(n, 's'*(n>1), nb, 's'*(nb!=1)))
+            else:
+                print('#   {} linker{} of L = {:g} bp (NRL {:g} bp) -> {} bead{}'.format(n, 's'*(n>1), L, L+NUC_BP, nb, 's'*(nb!=1)))
+    else:
+        nbs = [nb for L, nb in internal]
+        if linker_input=='ll':
+            print('#   {} linkers of {}-{} beads'.format(len(internal), min(nbs), max(nbs)))
+        else:
+            Ls = [L for L, nb in internal]
+            print('#   {} linkers, L = {:g}-{:g} bp (mean {:.1f}) -> {}-{} beads'.format(len(internal), min(Ls), max(Ls), np.mean(Ls), min(nbs), max(nbs)))
+
 # main function
 if __name__ == '__main__':
 
-    # input
-    # modified by GU
-    print('# syntax: chromatin_builder.py -f chains.txt -o chromatin.pdb -d data.chromatin -b in.bond_settings -hbox halfbox -gdna 0 -gnuc 0.35 -qH1 10. -scalepdb 0.1')
-    input_file='chains.txt'
-    pdb_file  ='chromatin.pdb'
-    data_file ='data.chromatin'
-    bond_file ='in.bond_settings'
-    halfbox   =-1.
-    gamma_nuc_condensation=0.0
-    gamma_dna_condensation=0.35
-    charge_H1=10.
-    ref='' # reference structure to set atom positions
-    scale_pdb=1.0 # scale for the pdb file
-    for i in range(len(sys.argv)):
-        if(sys.argv[i]=='-f'):   input_file=sys.argv[i+1]
-        elif(sys.argv[i]=='-cg'):   cg_file=sys.argv[i+1]
-        elif(sys.argv[i]=='-o'): pdb_file  =sys.argv[i+1]
-        elif(sys.argv[i]=='-d'): data_file =sys.argv[i+1]
-        elif(sys.argv[i]=='-b'): bond_file =sys.argv[i+1]
-        elif(sys.argv[i]=='-hbox'): halfbox=float(sys.argv[i+1])
-        elif(sys.argv[i]=='-gdna'): gamma_dna_condensation=float(sys.argv[i+1])
-        elif(sys.argv[i]=='-gnuc'): gamma_nuc_condensation=float(sys.argv[i+1])
-        elif(sys.argv[i]=='-qH1'):  charge_H1=float(sys.argv[i+1])
-        elif(sys.argv[i]=='-ref'):  ref=sys.argv[i+1]
-        elif(sys.argv[i]=='-scalepdb'): scale_pdb=float(sys.argv[i+1])
+    args = parse_arguments()
+    print('# ' + ' '.join(sys.argv) + '   (-h: options and input format)')
+    input_file, pdb_file, data_file, bond_file = args.input_file, args.pdb_file, args.data_file, args.bond_file
+    halfbox, scale_pdb = args.halfbox, args.scale_pdb
+    gamma_nuc_condensation, gamma_dna_condensation, charge_H1 = args.gamma_nuc_condensation, args.gamma_dna_condensation, args.charge_H1
+    dihedral_file, torsion = args.dihedral_file, args.torsion
+    twist_h, twist_N, twist_C, twist_sL = args.twist_h, args.twist_N, args.twist_C, args.twist_sL
 
     list_chains = read_chains(input_file)
     i=1
@@ -1364,16 +1688,19 @@ if __name__ == '__main__':
     chromatin_all=[]
     bonds_all=[]
     angles_all=[]
+    dihedrals_all=[]
     for chain_file in list_chains:
-        Nnuc, Llinkers, H1s, acetylations, brd4s, cg_coords  = read_input(chain_file)
+        Nnuc, Llinkers, Llinkers_bp, H1s, acetylations, brd4s, cg_coords, linker_input = read_input(chain_file, torsion)
         # Read input parameters
         print('# chain', i,":",Nnuc,'nucleosomes')
 
         # Build chromatin
         if Nnuc==0: # just DNA
+            print('# DNA: {} beads'.format(Llinkers[0]) if linker_input=='ll' else '# DNA: {:g} bp -> {} beads'.format(Llinkers_bp[0], Llinkers[0]))
             chromatin,bonds,angles = build_only_linker_dna(Llinkers[0], gamma_dna_condensation)
+            dihedrals = []
         else: # chromatin fiber with nucleosome+linker+nucleosome+...+linker+nucleosome
-            chromatin,bonds,angles = build_chromatin(Nnuc, Llinkers, cg_coords, gamma_dna_condensation, gamma_nuc_condensation, acetylations=acetylations, H1s=H1s,brd4s=brd4s, charge_H1=charge_H1)
+            chromatin,bonds,angles,dihedrals = build_chromatin(Nnuc, Llinkers, cg_coords, gamma_dna_condensation, gamma_nuc_condensation, acetylations=acetylations, H1s=H1s,brd4s=brd4s, charge_H1=charge_H1, Llinkers_bp=Llinkers_bp)
             expected_atoms =22*Nnuc+sum(Llinkers)+2*sum(H1s)
             expected_bonds =78*Nnuc+14*Nnuc+sum(Llinkers)-1+3*sum(H1s)
             expected_angles=        14*Nnuc+sum(Llinkers)-2+2*sum(H1s)
@@ -1384,6 +1711,9 @@ if __name__ == '__main__':
                 raise RuntimeError('unexpected number of bonds',len(bonds),expected_bonds)
             if len(angles)!=expected_angles:
                 raise RuntimeError('unexpected number of angles',len(angles),expected_angles)
+            if len(dihedrals)!=Nnuc-1:
+                raise RuntimeError('unexpected number of dihedrals',len(dihedrals),Nnuc-1)
+            print_linkers(Llinkers_bp, Llinkers, linker_input)
 
         # recenter and shift individual chromatin chains
         if len(cg_coords)==0:
@@ -1393,7 +1723,7 @@ if __name__ == '__main__':
                 a.position += (i-1)*shift
 
         #append newly generated chain to all
-        chromatin_all, bonds_all, angles_all = append_chromatin(chromatin_all,bonds_all,angles_all,chromatin,bonds,angles)
+        chromatin_all, bonds_all, angles_all, dihedrals_all = append_chromatin(chromatin_all,bonds_all,angles_all,chromatin,bonds,angles,dihedrals_all,dihedrals)
         i+=1
 
     # recenter again overall system
@@ -1410,9 +1740,18 @@ if __name__ == '__main__':
     # check and get equilibrium distances
     generate_bond_settings(bonds_all, bond_file)
 
+    # linker torsion dihedrals, only if requested
+    if torsion and len(dihedrals_all)>0:
+        set_dihedral_types(dihedrals_all)
+        generate_dihedral_settings(dihedrals_all, dihedral_file, twist_h, twist_N, twist_C, twist_sL)
+    else:
+        if torsion:
+            print('# linker torsion: no linkers between nucleosomes, {} not written'.format(dihedral_file))
+        dihedrals_all=[]
+
         # Write PDB file
     write_pdb(chromatin_all, pdb_file, scale=scale_pdb)
 
         # Write LAMMPS data file
-    write_lammps_data(chromatin_all, bonds_all, angles_all, data_file, halfbox)
+    write_lammps_data(chromatin_all, bonds_all, angles_all, data_file, halfbox, dihedrals_all)
 

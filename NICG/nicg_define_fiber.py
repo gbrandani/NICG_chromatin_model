@@ -1,19 +1,20 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
 NICG input generator: 1D A/B domains + per-nucleosome epigenetic states + linker lengths.
 
-This script produces inputs for `chromatin_builder.py` (NICG chromatin builder)
+This script produces inputs for `nicg_chromatin_builder.py` (NICG chromatin builder)
 
 Key outputs (written to --outdir):
   1) chains.txt
      Top-level multi-chain list: contains one line "chain input_chain1.txt".
 
   2) input_chain1.txt
-     The chain definition file expected by chromatin_builder.py, containing:
+     The chain definition file expected by nicg_chromatin_builder.py, containing:
        nuc N
-       ll  l0 l1 ... lN     (N+1 integers; linker lengths in *linker-DNA beads*)
+       nucpos s1 ... sN     (N integers; first bp of each nucleosome, counted from 1)
+       genlen G             (total DNA length in bp)
        H1  0/1 ...          (length N)
        ac  0/1 ...          (length N)
        brd4 0/1 ...         (length N)
@@ -62,8 +63,9 @@ Linkers:
   - Trailing overhang bp is chosen to make total length exact.
 
 Conversion to builder format:
-  - chromatin_builder expects linker lengths in *coarse-grained linker-DNA beads*.
-  - We convert bp -> beads by round(bp / bp_per_bead) (default 10.5 bp/bead).
+  - The builder gets the nucleosome positions in bp (nucpos = BED start + 1) and the total length (genlen),
+    and converts each linker to round(bp / 10.5) beads itself.
+  - The builder's nucleosome holds 147 bp, so nucleosomal_dna_bp must be 147.
 
 --------------------------------------------------------------------------------
 """
@@ -416,7 +418,8 @@ def assign_states(
 def write_chain_file(
     path: str,
     N: int,
-    ll_beads: List[int],
+    nuc_starts_bp: List[int],
+    total_bp: int,
     h1: List[int],
     ac: List[int],
     brd4: List[int],
@@ -426,17 +429,18 @@ def write_chain_file(
     Write the NICG builder chain file.
 
     IMPORTANT:
-      - ll must have length N+1
-      - H1/ac/brd4 must have length N
+      - nuc_starts_bp (0-based, as in nucs.bed) and H1/ac/brd4 must have length N
+      - nucpos is written 1-based: nucleosome i covers bp nucpos_i .. nucpos_i + 146
     """
-    if len(ll_beads) != N + 1:
-        raise ValueError(f"ll must have length N+1={N+1}, got {len(ll_beads)}")
+    if len(nuc_starts_bp) != N:
+        raise ValueError(f"nuc_starts_bp must have length N={N}, got {len(nuc_starts_bp)}")
     if not (len(h1) == len(ac) == len(brd4) == N):
         raise ValueError("H1/ac/brd4 must all have length N")
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"nuc {N}\n")
-        f.write("ll " + " ".join(map(str, ll_beads)) + "\n")
+        f.write("nucpos " + " ".join(str(s + 1) for s in nuc_starts_bp) + "\n")
+        f.write(f"genlen {total_bp}\n")
         f.write("H1 " + " ".join(map(str, h1)) + "\n")
         f.write("ac " + " ".join(map(str, ac)) + "\n")
         f.write("brd4 " + " ".join(map(str, brd4)) + "\n")
@@ -496,6 +500,9 @@ def main() -> None:
     if args.seed is not None:
         settings.seed = args.seed
 
+    if settings.nucleosomal_dna_bp != 147:
+        raise ValueError("nucleosomal_dna_bp must be 147, the DNA of a nucleosome in the NICG builder")
+
     rng = np.random.default_rng(settings.seed)
 
     # Total length in bp (1 kb = 1000 bp)
@@ -525,8 +532,8 @@ def main() -> None:
     # 4) Assign per-nucleosome states conditional on compartment (A/B)
     comps, ac, brd4, h1 = assign_states(nuc_starts_bp, boundaries, settings, rng)
 
-    # 5) Convert linker bp to linker beads for the builder input
-    #    Builder expects ll with N+1 integers:
+    # 5) Linker beads as the builder will make them (round(bp / 10.5)), for the summary only;
+    #    the chain file gives the nucleosome positions in bp:
     #      ll[0]     = leading overhang beads
     #      ll[1..N-1]= internal linkers between nucleosomes (N-1 values)
     #      ll[N]     = trailing overhang beads
@@ -542,7 +549,7 @@ def main() -> None:
     nucs_path = os.path.join(args.outdir, settings.nucs_bed_name)
     used_path = os.path.join(args.outdir, settings.used_settings_name)
 
-    write_chain_file(chain_path, N, ll_beads, h1, ac, brd4, cg_path=settings.cg_path)
+    write_chain_file(chain_path, N, nuc_starts_bp, total_bp, h1, ac, brd4, cg_path=settings.cg_path)
     write_top_level(top_path, settings.chain_name)
     write_nucs_bed(
         nucs_path,
