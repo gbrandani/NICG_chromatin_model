@@ -465,14 +465,16 @@ def generate_nucleosome(gamma_condensation=0.2, charge_H1=0., acetylation=False,
     # Generate histone positions
     his_positions = []
     ids_his = np.arange(-Lhis/2 + Lbp1his/2, Lhis/2, Lbp1his)
+    # bead names follow the histones each bead lies on in the crystal structure 1KX5 (H3 next to the dyad); before
+    # 2026-11-10 beads 2-5 were named H3 H4 H4 H3 (same bonds; the H3 and H4 types have the same interactions)
     if (acetylation and brd4):
-        his_names=['B2A','B2B','B3','B4','B4','B3','B2B','B2A']
+        his_names=['B2A','B2B','B4','B3','B3','B4','B2B','B2A']
     elif brd4:
         raise RuntimeError('brd4 binding without acetylation is not allowed')
     elif acetylation:
-        his_names=['A2A','A2B','A3','A4','A4','A3','A2B','A2A']
+        his_names=['A2A','A2B','A4','A3','A3','A4','A2B','A2A']
     else:
-        his_names=['H2A','H2B','H3','H4','H4','H3','H2B','H2A']
+        his_names=['H2A','H2B','H4','H3','H3','H4','H2B','H2A']
     charge_his=[0. for i in his_names]
     for i in ids_his:
         s = i * (2 * np.pi * Reff_his * alpha_his) / (Lhis - 1)
@@ -582,15 +584,15 @@ def generate_nucleosome_bonds(nucleosome):
     id0=nucleosome[0].index # index of first nucleosome atom
     bond_types={} # dictionary to set bond types based on key, type 1 reserved for linker DNA
     bond_types[(3,1)]=2 # bond along DNA backbone
-    bond_types[(4,0)]=3 # nucleosomal dna exit-H4 bond
+    bond_types[(4,0)]=3 # nucleosomal dna exit-H3 bond
     bond_types[(4,1)]=4 # nucleosomal dna exit-H2A bond, do not include, as it does not discriminate binding
     bond_types[(4,2)]=5 # nucleosomal dna exit-dna bond
     # same but for acetylated
-    bond_types[(5,0)]=6 # nucleosomal dna exit-H4 bond
+    bond_types[(5,0)]=6 # nucleosomal dna exit-H3 bond
     bond_types[(5,1)]=7 # nucleosomal dna exit-H2A bond, do not include, as it does not discriminate binding
     bond_types[(5,2)]=8 # nucleosomal dna exit-dna bond
     # same but for acetylated+brd4
-    bond_types[(6,0)]=9 # nucleosomal dna exit-H4 bond
+    bond_types[(6,0)]=9 # nucleosomal dna exit-H3 bond
     bond_types[(6,1)]=10 # nucleosomal dna exit-H2A bond, do not include, as it does not discriminate binding
     bond_types[(6,2)]=11 # nucleosomal dna exit-dna bond
     core_histone_names=['H2A','H2B','H3','H4','A2A','A2B','A3','A4','B2A','B2B','B3','B4']
@@ -609,7 +611,7 @@ def generate_nucleosome_bonds(nucleosome):
             if d>38.: continue # too far for bond
             # make a new bond
             # assume histone beads come first, then DNA beads
-            if (n1=='H4' and n2=='DEX'): # morse bond for nucleosome unwrapping
+            if (n1=='H3' and n2=='DEX'): # morse bond for nucleosome unwrapping
                 key1=4
                 key2=0
                 potential='morse'
@@ -621,7 +623,7 @@ def generate_nucleosome_bonds(nucleosome):
                 key1=4
                 key2=2
                 potential='morse'
-            elif (n1=='A4' and n2=='DAE'): # morse bond for nucleosome unwrapping
+            elif (n1=='A3' and n2=='DAE'): # morse bond for nucleosome unwrapping
                 key1=5
                 key2=0
                 potential='morse2'
@@ -633,7 +635,7 @@ def generate_nucleosome_bonds(nucleosome):
                 key1=5
                 key2=2
                 potential='morse2'
-            elif (n1=='B4' and n2=='DBE'): # morse bond for nucleosome unwrapping
+            elif (n1=='B3' and n2=='DBE'): # morse bond for nucleosome unwrapping
                 key1=6
                 key2=0
                 potential='morse2'

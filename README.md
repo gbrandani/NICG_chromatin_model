@@ -30,6 +30,8 @@ Each nucleosome is represented by point particles:
 * **14 nucleosomal DNA beads** (147 bp at 10.5 bp/bead),
 * Optional **2 H1 beads** (globular + C-terminal tail). 
 
+Along the histone superhelix the beads are H2A, H2B, H4, H3, H3, H4, H2B, H2A, each named after the histone it lies on in the 1KX5 crystal structure (H3 next to the dyad). Files built before November 2026 have beads 2–5 named H3, H4, H4, H3. Only the names and their type numbers differ: the bonds are the same, and the H3 and H4 types have the same interactions.
+
 Geometry:
 
 * Nucleosomal DNA beads are arranged on a superhelix (radius ~40 Å, pitch ~25 Å).
