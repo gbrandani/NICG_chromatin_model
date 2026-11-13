@@ -1294,7 +1294,7 @@ def write_pdb(chromatin, filename, scale=1.0):
     print(f'# PDB file written to {filename}')
 
 # Function to LAMMPS data file
-def write_lammps_data(chromatin, bonds, angles, filename, halfbox=-1, dihedrals=[]):
+def write_lammps_data(chromatin, bonds, angles, filename, halfbox=-1, dihedrals=[], box=None):
     atom_indices= [a.index for a in chromatin]
     bond_indices= [b.index for b in bonds]
     angle_indices=[b.index for b in angles]
@@ -1337,9 +1337,14 @@ def write_lammps_data(chromatin, bonds, angles, filename, halfbox=-1, dihedrals=
         if len(dihedrals)>0:
             fout.write('{} dihedral types\n'.format(max([d.dihedral_type for d in dihedrals])))
         fout.write('\n')
-        fout.write('-{:.1f} {:.1f} xlo xhi\n'.format(halfbox[0],halfbox[0]))
-        fout.write('-{:.1f} {:.1f} ylo yhi\n'.format(halfbox[1],halfbox[1]))
-        fout.write('-{:.1f} {:.1f} zlo zhi\n\n'.format(halfbox[2],halfbox[2]))
+        if box is None:
+            fout.write('-{:.1f} {:.1f} xlo xhi\n'.format(halfbox[0],halfbox[0]))
+            fout.write('-{:.1f} {:.1f} ylo yhi\n'.format(halfbox[1],halfbox[1]))
+            fout.write('-{:.1f} {:.1f} zlo zhi\n\n'.format(halfbox[2],halfbox[2]))
+        else: # box edges given by -box
+            fout.write('{:.1f} {:.1f} xlo xhi\n'.format(box[0],box[1]))
+            fout.write('{:.1f} {:.1f} ylo yhi\n'.format(box[2],box[3]))
+            fout.write('{:.1f} {:.1f} zlo zhi\n\n'.format(box[4],box[5]))
         fout.write('Masses\n\n')
         for i in range(1,Natom_types+1):
             mass=[a.mass for a in chromatin if a.atom_type==i][0]
@@ -1610,6 +1615,9 @@ def parse_arguments(argv=None):
                    help='bond coefficients to include in the LAMMPS input (default: %(default)s)')
     g.add_argument('-hbox', dest='halfbox', type=float, default=-1., metavar='A',
                    help='half the edge of the cubic box (A); <= 0: the box around the structure plus 35 A (default: %(default)g)')
+    g.add_argument('-box', dest='box', type=float, nargs=6, default=None, metavar=('X1', 'X2', 'Y1', 'Y2', 'Z1', 'Z2'),
+                   help='box edges (A) along x, y and z, e.g. a slab box; replaces -hbox. The structure is centred on '
+                        'the origin')
     g.add_argument('-scalepdb', dest='scale_pdb', type=float, default=1.0, metavar='X', help='scale factor of the PDB coordinates (default: %(default)g)')
     g.add_argument('-cg', dest='cg_file', default='', metavar='FILE', help='not used (the backbone is the cg key of a chain file)')
     g.add_argument('-ref', dest='ref', default='', metavar='FILE', help='not used')
@@ -1632,13 +1640,18 @@ def parse_arguments(argv=None):
     # argparse would also accept prefixes of the options (-scale for -scalepdb) and values glued to one-letter options
     # (-twn read as -t wn): accept only the options written in full, each followed by its value
     argv = sys.argv[1:] if argv is None else list(argv)
-    takes_value = {o: a.nargs!=0 for a in p._actions for o in a.option_strings}
+    n_values = {o: (1 if a.nargs is None else a.nargs) for a in p._actions for o in a.option_strings}
     i = 0
     while i<len(argv):
-        if argv[i] not in takes_value:
+        if argv[i] not in n_values:
             p.error('unrecognized argument {} (options are written in full, each followed by its value)'.format(argv[i]))
-        i += 2 if takes_value[argv[i]] else 1
+        i += 1 + n_values[argv[i]]
     args = p.parse_args(argv)
+    if args.box is not None:
+        if '-hbox' in argv:
+            p.error('give -box or -hbox, not both')
+        if not (args.box[0]<args.box[1] and args.box[2]<args.box[3] and args.box[4]<args.box[5]):
+            p.error('-box needs X1 < X2, Y1 < Y2 and Z1 < Z2')
     twist = (args.twist_h, args.twist_N, args.twist_C, args.twist_sL)
     args.torsion = args.torsion or any(x is not None for x in twist)
     for name, x, default in zip(('twist_h', 'twist_N', 'twist_C', 'twist_sL'), twist, (TORSION_H, TORSION_N, TORSION_C, TORSION_SL)):
@@ -1679,7 +1692,7 @@ if __name__ == '__main__':
     args = parse_arguments()
     print('# ' + ' '.join(sys.argv) + '   (-h: options and input format)')
     input_file, pdb_file, data_file, bond_file = args.input_file, args.pdb_file, args.data_file, args.bond_file
-    halfbox, scale_pdb = args.halfbox, args.scale_pdb
+    halfbox, scale_pdb, box = args.halfbox, args.scale_pdb, args.box
     gamma_nuc_condensation, gamma_dna_condensation, charge_H1 = args.gamma_nuc_condensation, args.gamma_dna_condensation, args.charge_H1
     dihedral_file, torsion = args.dihedral_file, args.torsion
     twist_h, twist_N, twist_C, twist_sL = args.twist_h, args.twist_N, args.twist_C, args.twist_sL
@@ -1755,5 +1768,10 @@ if __name__ == '__main__':
     write_pdb(chromatin_all, pdb_file, scale=scale_pdb)
 
         # Write LAMMPS data file
-    write_lammps_data(chromatin_all, bonds_all, angles_all, data_file, halfbox, dihedrals_all)
+    if box is not None:
+        outside = sum(1 for a in chromatin_all if not (box[0] <= a.position[0] <= box[1] and box[2] <= a.position[1] <= box[3]
+                                                      and box[4] <= a.position[2] <= box[5]))
+        if outside > 0:
+            print('# WARNING: {} of {} beads are outside the box of -box'.format(outside, len(chromatin_all)))
+    write_lammps_data(chromatin_all, bonds_all, angles_all, data_file, halfbox, dihedrals_all, box)
 

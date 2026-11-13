@@ -1,0 +1,3 @@
+nuc 12
+llbp 0 30 30 30 30 30 30 30 30 30 30 30 0
+cg fibers/path_44.txt

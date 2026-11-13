@@ -14,7 +14,8 @@ python NICG/nicg_define_fiber.py --config settings.input.json [--outdir DIR] [--
 
 # 2. build the CG model -> PDB, LAMMPS data file, in.bond_settings
 python NICG/nicg_chromatin_builder.py -f chains.txt -o chromatin.pdb -d data.chromatin -b in.bond_settings -hbox 400.0
-#    other flags: -gdna (default 0.35), -gnuc (0.0), -qH1 (H1 charge, 10.), -scalepdb (PDB coordinate scale);
+#    other flags: -box X1 X2 Y1 Y2 Z1 Z2 (any box instead of the cube of -hbox), -gdna (default 0.35), -gnuc (0.0),
+#    -qH1 (H1 charge, 10.), -scalepdb (PDB coordinate scale);
 #    linker torsion: -tw or -twh/-twN/-twC/-twsL, writes -t in.dihedral_settings; -h prints all options and the input format
 
 # 3. simulate
@@ -24,7 +25,7 @@ lmp < in.run            # fiber_100kb runs `lmp < in.relax` first and in.run rea
 python NICG/nicg_backmapping.py -cg chromatin.pdb -nuc NICG/pdb/<template>.pdb -libdir NICG/pdb -o allatom.pdb [-scale 10.0]
 ```
 
-Each `examples/*/run.sh` calls the scripts as bare `nicg_*.py`, so `NICG/` must be on `PATH`. The fastest way to check builder changes is to rebuild an example (e.g. `examples/n12nrl189`, `examples/dna`, or `examples/n12nrl189_torsion` for the torsion) and diff the regenerated `data.*`, `in.bond_settings` and `in.dihedral_settings` against the committed versions. The builder checks its own atom, bond and angle counts and raises on a mismatch.
+Each `examples/*/run.sh` calls the scripts as bare `nicg_*.py`, so `NICG/` must be on `PATH`. The fastest way to check builder changes is to rebuild an example (e.g. `examples/n12nrl189`, `examples/dna`, or `examples/n12nrl189_torsion` for the torsion) and diff the regenerated `data.*`, `in.bond_settings` and `in.dihedral_settings` against the committed versions. `examples/llps_ll30bp` (45 fibers in a slab box, `-box`) also exercises the `cg` placement: its `setup_fibers.py` writes `chains.txt` and `fibers/` (one chain file and one 2-point backbone per fiber) before the builder runs. The `cg` placement spaces the linker beads evenly between nucleosomes, so linker bonds start off their 35 Å rest length (32.3 Å with 3 beads per linker, 43 Å with 2). The builder checks its own atom, bond and angle counts and raises on a mismatch.
 
 ## Input formats
 
